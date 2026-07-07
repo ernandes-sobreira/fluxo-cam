@@ -102,6 +102,15 @@
     color:var(--warn);font-size:12px;padding:9px 15px;border-radius:12px;
     max-width:88vw;text-align:center;display:none}
   .toast.show{display:block}
+  .guesschip{position:fixed;bottom:200px;left:50%;transform:translateX(-50%);
+    z-index:41;background:rgba(8,20,15,.92);border:1px solid var(--sink);
+    color:var(--ink);font-size:12.5px;padding:7px 8px 7px 14px;border-radius:999px;
+    display:none;align-items:center;gap:8px;box-shadow:0 6px 24px rgba(0,0,0,.5)}
+  .guesschip.show{display:flex}
+  .guesschip button{border:0;border-radius:999px;padding:5px 12px;font-size:12px;
+    font-weight:600;cursor:pointer;font-family:inherit}
+  #guessuse{background:var(--sink);color:#04180d}
+  #guessno{background:transparent;color:var(--dim);padding:5px 8px}
 </style>
 </head>
 <body>
@@ -132,6 +141,7 @@
       <button data-b="water">💧 Água</button>
       <button data-b="soil">🟫 Solo seco</button>
       <button data-b="burn">🔥 Queimada</button>
+      <button data-b="concrete">🧱 Concreto</button>
     </div>
   </div>
   <div class="label">Hora do dia — <span id="tlabel">meio-dia</span></div>
@@ -143,6 +153,11 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="guesschip" id="guesschip">
+  <span id="guesstext">Parece concreto?</span>
+  <button id="guessuse">usar</button>
+  <button id="guessno">✕</button>
+</div>
 
 <div class="modal" id="modal">
   <div class="card">
@@ -172,6 +187,8 @@ const BIOMES = {
     note:'Respiração do solo; N₂O baixo e esporádico.' },
   burn:  { name:'Queimada ativa', dayFlux:+40, nightFlux:+38, gases:['co2','ch4','n2o'],
     note:'Combustão libera pulso intenso e contínuo.' },
+  concrete:{ name:'Concreto / urbano', dayFlux:+0.1, nightFlux:+0.1, gases:['co2'],
+    note:'Superfície selada: fluxo biológico ~nulo. Contraste com o Pantanal.' },
 };
 const GWP = { co2:1, ch4:28, n2o:265 };
 
@@ -224,31 +241,65 @@ ground.rotation.x=-Math.PI/2; scene.add(ground);
 const grid=new THREE.GridHelper(12,24,0x3a5a3a,0x203020);
 grid.position.y=0.01; scene.add(grid);
 
-/* esferas semitransparentes */
-const MAX=120;
-const sphereGeo=new THREE.SphereGeometry(1,20,16);
+/* névoa/pluma de gás — Points com sprite radial suave */
 const COLORS={co2:0xe0794a,ch4:0xc94fd6,n2o:0x4aa3e0,sink:0x5fd48a};
-const pool=[];
-for(let i=0;i<MAX;i++){
-  const mat=new THREE.MeshStandardMaterial({color:0xffffff,transparent:true,
-    opacity:0.34,roughness:0.15,metalness:0,emissive:0x000000,
-    emissiveIntensity:0.4,depthWrite:false});
-  const m=new THREE.Mesh(sphereGeo,mat); m.visible=false; scene.add(m);
-  pool.push({mesh:m,life:0,vx:0,vy:0,vz:0,dir:1,baseS:0.2});
+// sprite: disco radial com borda suave (parece fumaça, não bolha)
+function makeSmokeSprite(){
+  const c=document.createElement('canvas'); c.width=c.height=64;
+  const g=c.getContext('2d');
+  const grd=g.createRadialGradient(32,32,0,32,32,32);
+  grd.addColorStop(0,'rgba(255,255,255,1)');
+  grd.addColorStop(0.4,'rgba(255,255,255,0.5)');
+  grd.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle=grd; g.fillRect(0,0,64,64);
+  const t=new THREE.CanvasTexture(c); return t;
 }
+const smokeTex=makeSmokeSprite();
+
+const MAX=900;
+const pGeo=new THREE.BufferGeometry();
+const pPos=new Float32Array(MAX*3);
+const pCol=new Float32Array(MAX*3);
+const pAlpha=new Float32Array(MAX);
+pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
+pGeo.setAttribute('gasColor',new THREE.BufferAttribute(pCol,3));
+pGeo.setAttribute('alpha',new THREE.BufferAttribute(pAlpha,1));
+// shader material p/ alpha por partícula + sprite
+const pMat=new THREE.ShaderMaterial({
+  uniforms:{ map:{value:smokeTex} },
+  transparent:true, depthWrite:false,
+  blending:THREE.NormalBlending,
+  vertexShader:`
+    attribute float alpha; attribute vec3 gasColor;
+    varying float vA; varying vec3 vC;
+    void main(){ vA=alpha; vC=gasColor;
+      vec4 mv=modelViewMatrix*vec4(position,1.0);
+      gl_PointSize=42.0*(1.0/-mv.z);
+      gl_Position=projectionMatrix*mv; }`,
+  fragmentShader:`
+    uniform sampler2D map; varying float vA; varying vec3 vC;
+    void main(){ vec4 t=texture2D(map,gl_PointCoord);
+      if(t.a*vA<0.01) discard;
+      gl_FragColor=vec4(vC, t.a*vA); }`
+});
+const pts=new THREE.Points(pGeo,pMat); scene.add(pts);
+
+const pool=[];
+for(let i=0;i<MAX;i++) pool.push({i,life:0,x:0,y:0,z:0,vx:0,vy:0,vz:0,dir:1,phase:0,freq:0});
 let cursor=0;
+function hexToRGB(h){return [((h>>16)&255)/255,((h>>8)&255)/255,(h&255)/255];}
 function spawn(gas,goingUp,strength){
   const p=pool[cursor]; cursor=(cursor+1)%MAX;
-  const a=Math.random()*Math.PI*2, r=Math.random()*3.0;
-  p.mesh.position.set(Math.cos(a)*r, goingUp?0.1:2.4+Math.random(), Math.sin(a)*r);
-  const s=0.12+Math.random()*0.14+strength*0.004;
-  p.baseS=s; p.mesh.scale.setScalar(s);
-  const c=goingUp?COLORS[gas]:COLORS.sink;
-  p.mesh.material.color.setHex(c); p.mesh.material.emissive.setHex(c);
-  p.vx=(Math.random()-.5)*0.12;
-  p.vy=(goingUp?1:-1)*(0.35+strength*0.02)*(0.6+Math.random());
-  p.vz=(Math.random()-.5)*0.12;
-  p.dir=goingUp?1:-1; p.life=1; p.mesh.visible=true;
+  const a=Math.random()*Math.PI*2, r=Math.random()*2.6;
+  p.x=Math.cos(a)*r; p.z=Math.sin(a)*r;
+  p.y=goingUp? 0.05+Math.random()*0.1 : 2.4+Math.random();
+  p.vx=(Math.random()-.5)*0.05;
+  p.vy=(goingUp?1:-1)*(0.25+strength*0.012)*(0.6+Math.random()*0.7);
+  p.vz=(Math.random()-.5)*0.05;
+  p.dir=goingUp?1:-1; p.life=1;
+  p.phase=Math.random()*Math.PI*2; p.freq=0.8+Math.random()*1.4;
+  const c=hexToRGB(goingUp?COLORS[gas]:COLORS.sink);
+  pCol[p.i*3]=c[0]; pCol[p.i*3+1]=c[1]; pCol[p.i*3+2]=c[2];
 }
 
 const rvalue=document.getElementById('rvalue');
@@ -265,6 +316,7 @@ function seasonName(){ return SEASON[world.month] ? SEASON[world.month][0] : '�
 function currentFlux(){
   const b=BIOMES[biome], d=dayFactor(minutes);
   let f = b.nightFlux+(b.dayFlux-b.nightFlux)*d;
+  if(biome==='concrete') return f; // superfície selada, sem efeito sazonal
   const w=wetness();
   // Água: metano potencializado na cheia (mais lâmina d'água).
   if(biome==='water') f += w*4;
@@ -318,15 +370,24 @@ function tick(now){
     }else spawn('co2',false,Math.abs(f));
   }
   if(b.methane&&Math.random()<0.03)for(let k=0;k<5;k++)spawn('ch4',true,6);
+  const t=now*0.001;
   for(const p of pool){
-    if(p.life<=0)continue;
-    p.mesh.position.x+=p.vx*dt; p.mesh.position.y+=p.vy*dt; p.mesh.position.z+=p.vz*dt;
-    p.life-=dt*0.3;
+    if(p.life<=0){ pAlpha[p.i]=0; continue; }
+    // turbulência lateral senoidal — dá sensação de fumaça subindo
+    const turb=Math.sin(t*p.freq+p.phase)*0.15*p.life;
+    p.x+=(p.vx+turb)*dt;
+    p.y+=p.vy*dt;
+    p.z+=(p.vz+Math.cos(t*p.freq+p.phase)*0.15*p.life)*dt;
+    p.life-=dt*0.28;
+    pPos[p.i*3]=p.x; pPos[p.i*3+1]=p.y; pPos[p.i*3+2]=p.z;
+    // névoa: nasce translúcida, fica um pouco mais densa, dissipa
     const age=1-p.life;
-    p.mesh.scale.setScalar(p.baseS*(1+age*0.6));
-    p.mesh.material.opacity=0.34*Math.min(1,p.life*1.6);
-    if((p.dir<0&&p.mesh.position.y<0.05)||p.life<=0){p.life=0;p.mesh.visible=false;}
+    pAlpha[p.i]=Math.min(0.55, p.life*0.7) * (age<0.15? age/0.15 : 1);
+    if((p.dir<0&&p.y<0.05)||p.life<=0){p.life=0;pAlpha[p.i]=0;}
   }
+  pGeo.attributes.position.needsUpdate=true;
+  pGeo.attributes.alpha.needsUpdate=true;
+  pGeo.attributes.gasColor.needsUpdate=true;
   if(camMode){
     scene.rotation.y+=(tiltX-scene.rotation.y)*0.08;
     cam.position.y=2.4+tiltY*1.5; cam.lookAt(0,1.2,0);
@@ -429,16 +490,24 @@ function startColorSampling(){
     try{
       sctx.drawImage(video,0,0,32,32);
       const d=sctx.getImageData(0,0,32,32).data;
-      let sum=0;
+      let sum=0, rS=0,gS=0,bS=0, n=d.length/4;
       for(let i=0;i<d.length;i+=4){
-        // luminância perceptual
+        rS+=d[i]; gS+=d[i+1]; bS+=d[i+2];
         sum+=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]);
       }
-      const lum=(sum/(d.length/4))/255; // 0..1
-      // escuro(úmido)=mais névoa; claro(seco)=menos. NÃO toca no valor µmol.
+      const lum=(sum/n)/255;
       world.mist=Math.max(0.6,Math.min(1.6,1.6-lum*1.0));
-    }catch(_){/* CORS/estado inválido: ignora */}
-  },600);
+      // palpite grosseiro de superfície (SUGESTÃO, não detecção)
+      const r=rS/n, g=gS/n, bl=bS/n, mx=Math.max(r,g,bl), mn=Math.min(r,g,bl);
+      const sat=(mx-mn)/(mx||1);
+      let guess=null;
+      if(sat<0.12 && lum>0.35 && lum<0.75) guess='concrete';   // cinza médio
+      else if(g>r*1.15 && g>bl*1.05 && sat>0.18) guess='grass'; // esverdeado
+      else if(bl>r*1.1 && bl>g*1.02) guess='water';            // azulado
+      else if(r>g*1.05 && sat>0.15 && lum<0.55) guess='soil';  // terroso escuro
+      showSurfaceGuess(guess);
+    }catch(_){}
+  },700);
 }
 function stopColorSampling(){ if(sampleTimer){clearInterval(sampleTimer);sampleTimer=null;} world.mist=1.0; }
 
@@ -447,6 +516,31 @@ const _enableCam=enableCam, _disableCam=disableCam;
 enableCam=async function(){ await _enableCam(); if(camMode) startColorSampling(); };
 disableCam=function(){ stopColorSampling(); _disableCam(); };
 btnCam.onclick=()=>{camMode?disableCam():enableCam();};
+
+/* ---------- sugestão de superfície (câmera sugere, você confirma) ---------- */
+const guesschip=document.getElementById('guesschip');
+const guesstext=document.getElementById('guesstext');
+const NAMES={grass:'campo/grama',water:'água',soil:'solo exposto',concrete:'concreto',burn:'queimada'};
+let lastGuess=null, guessTimer=null;
+function showSurfaceGuess(g){
+  if(!g || g===biome){ guesschip.classList.remove('show'); return; }
+  if(g===lastGuess && guesschip.classList.contains('show')) return;
+  lastGuess=g;
+  guesstext.textContent='Parece '+NAMES[g]+'?';
+  guesschip.classList.add('show');
+  clearTimeout(guessTimer);
+  guessTimer=setTimeout(()=>guesschip.classList.remove('show'),4000);
+}
+function selectBiome(b){
+  biome=b;
+  [...document.getElementById('biome').children].forEach(c=>c.classList.toggle('on',c.dataset.b===b));
+  updateReadout();
+}
+document.getElementById('guessuse').onclick=()=>{
+  if(lastGuess) selectBiome(lastGuess);
+  guesschip.classList.remove('show');
+};
+document.getElementById('guessno').onclick=()=>guesschip.classList.remove('show');
 
 /* tenta GPS automaticamente ao abrir (degrada limpo se negado) */
 requestGPS();
