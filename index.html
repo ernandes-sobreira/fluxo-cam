@@ -90,6 +90,13 @@
     line-height:1;margin-top:-4px}
   .card .cite{font-size:11.5px;color:var(--dim);border-top:1px solid var(--line);
     padding-top:12px;margin-top:4px}
+  .locbar{position:fixed;top:calc(env(safe-area-inset-top,0) + 40px);left:50%;
+    transform:translateX(-50%);z-index:29;font-size:10.5px;
+    background:rgba(8,20,15,.85);border:1px solid var(--line);color:var(--dim);
+    padding:4px 11px;border-radius:999px;white-space:nowrap;max-width:92vw;
+    overflow:hidden;text-overflow:ellipsis}
+  .locbar.ok{border-color:var(--sink);color:var(--sink)}
+  .locbar.warn{border-color:var(--warn);color:var(--warn)}
   .toast{position:fixed;bottom:120px;left:50%;transform:translateX(-50%);
     z-index:40;background:rgba(20,14,4,.92);border:1px solid var(--warn);
     color:var(--warn);font-size:12px;padding:9px 15px;border-radius:12px;
@@ -102,6 +109,7 @@
 <div id="app"></div>
 
 <div class="seal" id="seal">⚠ REPRESENTAÇÃO — valores simulados, não medição</div>
+<div class="locbar" id="locbar">📍 Sem localização — estação estimada pela data do aparelho</div>
 
 <div class="readout" id="readout">
   <div style="color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.08em">Fluxo líquido de CO₂</div>
@@ -112,6 +120,7 @@
 
 <div class="fabs">
   <button class="fab" id="btnInfo" title="Sobre">i</button>
+  <button class="fab" id="btnGPS" title="Usar minha localização">📍</button>
   <button class="fab" id="btnCam" title="Modo câmera">📷</button>
 </div>
 
@@ -165,6 +174,26 @@ const BIOMES = {
     note:'Combustão libera pulso intenso e contínuo.' },
 };
 const GWP = { co2:1, ch4:28, n2o:265 };
+
+/* ============================================================
+   ESTAÇÃO DO PANTANAL POR MÊS — CONFIRA COM SEU CAMPO EM CÁCERES.
+   wetness 0=seca total, 1=cheia. Modula metano e emissão de solo.
+   ============================================================ */
+const SEASON = {
+  1:['cheia',1.0], 2:['cheia',1.0], 3:['cheia',0.9], 4:['cheia',0.8],
+  5:['vazante',0.5], 6:['vazante',0.3],
+  7:['seca',0.1], 8:['seca',0.0], 9:['seca',0.0], 10:['seca',0.1],
+  11:['enchente',0.4], 12:['enchente',0.7]
+};
+const BBOX={latmin:-22.5,latmax:-15.5,lonmin:-59.5,lonmax:-54.5};
+const inPantanal=(la,lo)=>la>=BBOX.latmin&&la<=BBOX.latmax&&lo>=BBOX.lonmin&&lo<=BBOX.lonmax;
+
+const world={
+  hasGPS:false, lat:null, lon:null, inRegion:false,
+  month:(new Date()).getMonth()+1,
+  manualTime:false,
+  mist:1.0
+};
 
 let biome='grass', minutes=720, camMode=false;
 // Fator solar: 0 na noite plena, 1 no pico (~13h).
@@ -231,8 +260,20 @@ const fmtTime=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).pad
 function timeWord(m){const h=m/60;
   if(h<5)return'madrugada';if(h<8)return'amanhecer';if(h<11)return'manhã';
   if(h<14)return'meio-dia';if(h<17)return'tarde';if(h<19)return'entardecer';return'noite';}
-function currentFlux(){const b=BIOMES[biome],d=dayFactor(minutes);
-  return b.nightFlux+(b.dayFlux-b.nightFlux)*d;}
+function wetness(){ return SEASON[world.month] ? SEASON[world.month][1] : 0.3; }
+function seasonName(){ return SEASON[world.month] ? SEASON[world.month][0] : '—'; }
+function currentFlux(){
+  const b=BIOMES[biome], d=dayFactor(minutes);
+  let f = b.nightFlux+(b.dayFlux-b.nightFlux)*d;
+  const w=wetness();
+  // Água: metano potencializado na cheia (mais lâmina d'água).
+  if(biome==='water') f += w*4;
+  // Solo seco: encharcado emite menos CO2 (respiração cai); seco emite mais.
+  if(biome==='soil') f += (1-w)*1.5;
+  // Campo alagado na cheia: sequestro diurno cai (planta submersa/estressada).
+  if(biome==='grass' && d>0) f += w*2;
+  return f;
+}
 function updateReadout(){
   const b=BIOMES[biome],f=currentFlux(),up=f>0;
   rvalue.textContent=(f>0?'+':'')+f.toFixed(1);
@@ -243,8 +284,11 @@ function updateReadout(){
   let g='';
   if(b.gases.includes('ch4'))g+=`CH₄ ~${GWP.ch4}× o CO₂ (100 anos). `;
   if(b.gases.includes('n2o'))g+=`N₂O ~${GWP.n2o}×. `;
-  g+=b.note; gwpEl.textContent=g;
-  tlabel.textContent=timeWord(minutes)+' · '+fmtTime(minutes);
+  g+=b.note;
+  const mesNome=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][world.month];
+  g+=` · ${seasonName()} (${mesNome})`;
+  gwpEl.textContent=g;
+  tlabel.textContent=timeWord(minutes)+' · '+fmtTime(minutes)+(world.manualTime?' (manual)':' (agora)');
   const d=dayFactor(minutes);
   sun.intensity=0.15+d*1.0; sky.intensity=0.25+d*0.55;
   const nightCol=new THREE.Color(0x0a1410),dayCol=new THREE.Color(0x16281a);
@@ -262,7 +306,9 @@ let last=performance.now(),acc=0;
 function tick(now){
   const dt=Math.min(0.05,(now-last)/1000); last=now;
   const b=BIOMES[biome],f=currentFlux();
-  acc+=Math.min(1,Math.abs(f)/12)*3*dt*30;
+  // world.mist (cor da câmera) e wetness afetam SÓ a quantidade visual.
+  const visualMult = world.mist * (0.7 + wetness()*0.6);
+  acc+=Math.min(1,Math.abs(f)/12)*3*dt*30*visualMult;
   while(acc>1){
     acc-=1; const up=f>0;
     if(up){
@@ -296,7 +342,14 @@ document.getElementById('biome').addEventListener('click',e=>{
   [...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===btn));
   updateReadout();
 });
-document.getElementById('time').addEventListener('input',e=>{minutes=+e.target.value;updateReadout();});
+const timeSlider=document.getElementById('time');
+timeSlider.addEventListener('input',e=>{minutes=+e.target.value;world.manualTime=true;updateReadout();});
+// Inicializa com a hora real do celular
+(function initClock(){
+  const now=new Date();
+  minutes=now.getHours()*60+now.getMinutes();
+  timeSlider.value=minutes;
+})();
 const modal=document.getElementById('modal');
 document.getElementById('btnInfo').onclick=()=>modal.classList.add('open');
 document.getElementById('modalX').onclick=()=>modal.classList.remove('open');
@@ -336,6 +389,67 @@ function disableCam(){
   scene.rotation.y=0; cam.position.set(0,2.4,6); cam.lookAt(0,1.2,0);
 }
 btnCam.onclick=()=>{camMode?disableCam():enableCam();};
+
+/* ---------- GPS ---------- */
+const locbar=document.getElementById('locbar');
+const btnGPS=document.getElementById('btnGPS');
+function setLoc(text,cls){locbar.textContent=text;locbar.className='locbar'+(cls?' '+cls:'');}
+function requestGPS(){
+  if(!navigator.geolocation){
+    setLoc('📍 GPS indisponível neste navegador — estação pela data','warn'); return;
+  }
+  setLoc('📍 Localizando…');
+  navigator.geolocation.getCurrentPosition(pos=>{
+    world.hasGPS=true;
+    world.lat=pos.coords.latitude; world.lon=pos.coords.longitude;
+    world.inRegion=inPantanal(world.lat,world.lon);
+    const mes=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][world.month];
+    if(world.inRegion){
+      setLoc(`📍 No Pantanal · ${seasonName()} (${mes}) · dados regionais`,'ok');
+    }else{
+      setLoc(`📍 Fora do Pantanal · usando ${seasonName()} do Pantanal como referência`,'warn');
+    }
+    btnGPS.classList.add('active');
+    updateReadout();
+  },err=>{
+    setLoc('📍 Localização negada — estação estimada pela data do aparelho','warn');
+  },{enableHighAccuracy:false,timeout:8000,maximumAge:600000});
+}
+btnGPS.onclick=requestGPS;
+
+/* ---------- amostragem de cor da câmera -> névoa (só visual) ---------- */
+const sampleCanvas=document.createElement('canvas');
+sampleCanvas.width=32; sampleCanvas.height=32;
+const sctx=sampleCanvas.getContext('2d',{willReadFrequently:true});
+let sampleTimer=null;
+function startColorSampling(){
+  stopColorSampling();
+  sampleTimer=setInterval(()=>{
+    if(!camMode||video.readyState<2)return;
+    try{
+      sctx.drawImage(video,0,0,32,32);
+      const d=sctx.getImageData(0,0,32,32).data;
+      let sum=0;
+      for(let i=0;i<d.length;i+=4){
+        // luminância perceptual
+        sum+=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]);
+      }
+      const lum=(sum/(d.length/4))/255; // 0..1
+      // escuro(úmido)=mais névoa; claro(seco)=menos. NÃO toca no valor µmol.
+      world.mist=Math.max(0.6,Math.min(1.6,1.6-lum*1.0));
+    }catch(_){/* CORS/estado inválido: ignora */}
+  },600);
+}
+function stopColorSampling(){ if(sampleTimer){clearInterval(sampleTimer);sampleTimer=null;} world.mist=1.0; }
+
+/* liga/desliga amostragem junto com a câmera */
+const _enableCam=enableCam, _disableCam=disableCam;
+enableCam=async function(){ await _enableCam(); if(camMode) startColorSampling(); };
+disableCam=function(){ stopColorSampling(); _disableCam(); };
+btnCam.onclick=()=>{camMode?disableCam():enableCam();};
+
+/* tenta GPS automaticamente ao abrir (degrada limpo se negado) */
+requestGPS();
 
 if(!sessionStorage.getItem('seen')){modal.classList.add('open');sessionStorage.setItem('seen','1');}
 </script>
