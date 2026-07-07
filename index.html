@@ -248,7 +248,7 @@ const grid=new THREE.GridHelper(12,24,0x3a5a3a,0x203020);
 grid.position.y=0.01; scene.add(grid);
 
 /* névoa/pluma de gás — Points com sprite radial suave */
-const COLORS={co2:0xe0794a,ch4:0xc94fd6,n2o:0x4aa3e0,sink:0x5fd48a};
+const COLORS={co2:0xff7a2a,ch4:0xe040ff,n2o:0x30b0ff,sink:0x40ff90};
 // sprite: disco radial com borda suave (parece fumaça, não bolha)
 function makeSmokeSprite(){
   const c=document.createElement('canvas'); c.width=c.height=64;
@@ -280,7 +280,7 @@ const pMat=new THREE.ShaderMaterial({
     varying float vA; varying vec3 vC;
     void main(){ vA=alpha; vC=gasColor;
       vec4 mv=modelViewMatrix*vec4(position,1.0);
-      gl_PointSize=42.0*(1.0/-mv.z);
+      gl_PointSize=max(24.0, 320.0*(1.0/-mv.z));
       gl_Position=projectionMatrix*mv; }`,
   fragmentShader:`
     uniform sampler2D map; varying float vA; varying vec3 vC;
@@ -366,7 +366,7 @@ function tick(now){
   const b=BIOMES[biome],f=currentFlux();
   // world.mist (cor da câmera) e wetness afetam SÓ a quantidade visual.
   const visualMult = world.mist * (0.7 + wetness()*0.6);
-  acc+=Math.min(1,Math.abs(f)/12)*3*dt*30*visualMult;
+  acc+=(0.4+Math.min(1,Math.abs(f)/12))*4*dt*30*visualMult;
   while(acc>1){
     acc-=1; const up=f>0;
     if(up){
@@ -388,7 +388,7 @@ function tick(now){
     pPos[p.i*3]=p.x; pPos[p.i*3+1]=p.y; pPos[p.i*3+2]=p.z;
     // névoa: nasce translúcida, fica um pouco mais densa, dissipa
     const age=1-p.life;
-    pAlpha[p.i]=Math.min(0.55, p.life*0.7) * (age<0.15? age/0.15 : 1);
+    pAlpha[p.i]=Math.min(0.9, p.life*1.1) * (age<0.15? age/0.15 : 1);
     if((p.dir<0&&p.y<0.05)||p.life<=0){p.life=0;pAlpha[p.i]=0;}
   }
   pGeo.attributes.position.needsUpdate=true;
