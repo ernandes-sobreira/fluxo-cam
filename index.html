@@ -3,580 +3,526 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Fluxo Vivo — GEE no Pantanal</title>
-<meta name="description" content="Visualização educativa de fluxos de gases de efeito estufa no Pantanal. Valores simulados.">
+<title>Fluxo Vivo AR — GEE no Pantanal</title>
 <style>
   :root{
     --bg:#0a1410; --panel:rgba(8,20,15,.82); --ink:#e8f2ec;
     --dim:#8fae9f; --line:rgba(120,180,150,.22);
-    --co2:#e0794a; --ch4:#c94fd6; --n2o:#4aa3e0; --sink:#5fd48a;
+    --co2:#ff7a2a; --ch4:#e040ff; --n2o:#30b0ff; --sink:#40ff90;
     --warn:#ffd24a;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;overflow:hidden;background:var(--bg);
     font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     color:var(--ink);-webkit-tap-highlight-color:transparent}
-  #app{position:fixed;inset:0}
-  canvas{display:block}
-  #cam{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;
-    z-index:0;display:none;background:#000}
-  #cam.on{display:block}
+  #cam{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;background:#000}
+  #gl{position:fixed;inset:0;z-index:1;pointer-events:none}
+  #app{position:fixed;inset:0;z-index:1}
 
-  .seal{position:fixed;top:calc(env(safe-area-inset-top,0) + 10px);left:50%;
-    transform:translateX(-50%);z-index:30;
-    background:rgba(20,14,4,.9);border:1px solid var(--warn);
-    color:var(--warn);font-size:11px;font-weight:600;letter-spacing:.02em;
-    padding:6px 12px;border-radius:999px;white-space:nowrap;
-    box-shadow:0 4px 20px rgba(0,0,0,.4)}
+  .seal{position:fixed;top:calc(env(safe-area-inset-top,0) + 8px);left:50%;
+    transform:translateX(-50%);z-index:30;background:rgba(20,14,4,.9);
+    border:1px solid var(--warn);color:var(--warn);font-size:10.5px;font-weight:600;
+    padding:5px 11px;border-radius:999px;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+  .locbar{position:fixed;top:calc(env(safe-area-inset-top,0) + 36px);left:50%;
+    transform:translateX(-50%);z-index:29;font-size:10px;background:rgba(8,20,15,.85);
+    border:1px solid var(--line);color:var(--dim);padding:3px 10px;border-radius:999px;
+    white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
+  .locbar.ok{border-color:var(--sink);color:var(--sink)}
+  .locbar.warn{border-color:var(--warn);color:var(--warn)}
 
-  .panel{position:fixed;left:12px;right:12px;
-    bottom:calc(env(safe-area-inset-bottom,0) + 12px);z-index:20;
-    background:var(--panel);backdrop-filter:blur(14px);
-    border:1px solid var(--line);border-radius:18px;padding:14px 14px 12px}
-  .row{display:flex;gap:8px;margin-bottom:10px}
-  .row:last-child{margin-bottom:0}
-  .seg{flex:1;display:flex;background:rgba(0,0,0,.3);border-radius:12px;
-    padding:3px;gap:3px}
-  .seg button{flex:1;border:0;background:transparent;color:var(--dim);
-    font-size:13px;font-weight:600;padding:9px 4px;border-radius:9px;
-    cursor:pointer;transition:.15s;font-family:inherit}
-  .seg button.on{background:rgba(95,212,138,.18);color:var(--ink);
-    box-shadow:inset 0 0 0 1px rgba(95,212,138,.4)}
-  .label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;
-    color:var(--dim);margin-bottom:5px;padding-left:4px}
-  .timewrap{display:flex;align-items:center;gap:10px;padding:2px 4px}
-  .timewrap span{font-size:16px;width:22px;text-align:center}
-  input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:6px;
-    border-radius:3px;
-    background:linear-gradient(90deg,#0b2036,#1a3a2a,#8a6d1f,#1a3a2a,#0b2036);outline:none}
-  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;
-    height:22px;border-radius:50%;background:#fff;cursor:pointer;
-    box-shadow:0 2px 8px rgba(0,0,0,.5)}
-  input[type=range]::-moz-range-thumb{width:22px;height:22px;border:0;
-    border-radius:50%;background:#fff;cursor:pointer}
-
-  .readout{position:fixed;top:calc(env(safe-area-inset-top,0) + 52px);left:12px;
-    z-index:20;background:var(--panel);backdrop-filter:blur(14px);
-    border:1px solid var(--line);border-radius:14px;padding:11px 13px;
-    max-width:230px;font-size:12px;line-height:1.5}
+  .readout{position:fixed;top:calc(env(safe-area-inset-top,0) + 62px);left:12px;z-index:20;
+    background:var(--panel);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:14px;padding:11px 13px;max-width:250px;font-size:12px;line-height:1.5}
+  .readout .head{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.08em}
   .readout .big{font-size:20px;font-weight:700;margin:2px 0}
   .readout .unit{color:var(--dim);font-size:11px}
   .dir{display:inline-block;font-weight:700}
-  .dir.up{color:var(--co2)} .dir.down{color:var(--sink)}
-  .gwp{color:var(--dim);font-size:11px;margin-top:6px;
-    border-top:1px solid var(--line);padding-top:6px}
-  .swatch{display:inline-block;width:9px;height:9px;border-radius:2px;
-    margin-right:5px;vertical-align:middle}
+  .dir.up{color:var(--co2)} .dir.down{color:var(--sink)} .dir.zero{color:var(--dim)}
+  .gwp{color:var(--dim);font-size:11px;margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
+  .detected{margin-top:6px;font-size:11px;color:var(--sink);font-weight:600}
 
-  .fabs{position:fixed;right:12px;top:calc(env(safe-area-inset-top,0) + 52px);
-    z-index:20;display:flex;flex-direction:column;gap:8px}
+  .fabs{position:fixed;right:12px;top:calc(env(safe-area-inset-top,0) + 62px);z-index:20;
+    display:flex;flex-direction:column;gap:8px}
   .fab{width:46px;height:46px;border-radius:50%;border:1px solid var(--line);
-    background:var(--panel);backdrop-filter:blur(14px);color:var(--ink);
-    font-size:18px;cursor:pointer;display:flex;align-items:center;
-    justify-content:center}
-  .fab.active{background:rgba(95,212,138,.25);
-    box-shadow:inset 0 0 0 1px var(--sink)}
+    background:var(--panel);backdrop-filter:blur(14px);color:var(--ink);font-size:18px;
+    cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .fab.active{background:rgba(64,255,144,.22);box-shadow:inset 0 0 0 1px var(--sink)}
 
-  .modal{position:fixed;inset:0;z-index:50;background:rgba(4,10,7,.82);
-    backdrop-filter:blur(6px);display:none;align-items:center;
-    justify-content:center;padding:20px}
+  .panel{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0) + 12px);
+    z-index:20;background:var(--panel);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:18px;padding:12px}
+  .label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);
+    margin-bottom:6px;padding-left:2px;display:flex;justify-content:space-between;align-items:center}
+  .seg{display:flex;background:rgba(0,0,0,.3);border-radius:12px;padding:3px;gap:2px;flex-wrap:wrap}
+  .seg button{flex:1;border:0;background:transparent;color:var(--dim);font-size:11px;
+    font-weight:600;padding:8px 3px;border-radius:9px;cursor:pointer;font-family:inherit;min-width:56px}
+  .seg button.on{background:rgba(64,255,144,.16);color:var(--ink);
+    box-shadow:inset 0 0 0 1px rgba(64,255,144,.4)}
+  .modebadge{font-size:9px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);
+    color:var(--dim);text-transform:none;letter-spacing:0;font-weight:600}
+  .modebadge.auto{border-color:var(--sink);color:var(--sink)}
+
+  .startscreen{position:fixed;inset:0;z-index:60;background:#081410;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px;text-align:center}
+  .startscreen h1{font-size:22px;margin-bottom:10px}
+  .startscreen p{font-size:13.5px;color:#cfe0d6;line-height:1.6;max-width:400px;margin-bottom:8px}
+  .startscreen .warn{color:var(--warn);font-size:12px;margin:14px 0}
+  .startscreen button{margin-top:18px;background:var(--sink);color:#04180d;border:0;
+    padding:14px 28px;border-radius:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+  .loadbar{position:fixed;inset:0;z-index:55;background:rgba(4,10,7,.92);
+    display:none;flex-direction:column;align-items:center;justify-content:center;color:var(--ink)}
+  .loadbar.show{display:flex}
+  .spinner{width:44px;height:44px;border:4px solid rgba(64,255,144,.2);
+    border-top-color:var(--sink);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:16px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .modal{position:fixed;inset:0;z-index:50;background:rgba(4,10,7,.85);backdrop-filter:blur(6px);
+    display:none;align-items:center;justify-content:center;padding:20px}
   .modal.open{display:flex}
-  .card{background:#0c1a13;border:1px solid var(--line);border-radius:20px;
-    padding:22px;max-width:440px;max-height:82vh;overflow-y:auto}
+  .card{background:#0c1a13;border:1px solid var(--line);border-radius:20px;padding:22px;
+    max-width:440px;max-height:82vh;overflow-y:auto}
   .card h2{font-size:18px;margin-bottom:12px}
-  .card p{font-size:13.5px;line-height:1.65;color:#cfe0d6;margin-bottom:11px}
+  .card p{font-size:13px;line-height:1.6;color:#cfe0d6;margin-bottom:10px}
   .card b{color:var(--ink)}
-  .card .x{float:right;font-size:22px;cursor:pointer;color:var(--dim);
-    line-height:1;margin-top:-4px}
-  .card .cite{font-size:11.5px;color:var(--dim);border-top:1px solid var(--line);
-    padding-top:12px;margin-top:4px}
-  .locbar{position:fixed;top:calc(env(safe-area-inset-top,0) + 40px);left:50%;
-    transform:translateX(-50%);z-index:29;font-size:10.5px;
-    background:rgba(8,20,15,.85);border:1px solid var(--line);color:var(--dim);
-    padding:4px 11px;border-radius:999px;white-space:nowrap;max-width:92vw;
-    overflow:hidden;text-overflow:ellipsis}
-  .locbar.ok{border-color:var(--sink);color:var(--sink)}
-  .locbar.warn{border-color:var(--warn);color:var(--warn)}
-  .toast{position:fixed;bottom:120px;left:50%;transform:translateX(-50%);
-    z-index:40;background:rgba(20,14,4,.92);border:1px solid var(--warn);
-    color:var(--warn);font-size:12px;padding:9px 15px;border-radius:12px;
-    max-width:88vw;text-align:center;display:none}
+  .card .x{float:right;font-size:22px;cursor:pointer;color:var(--dim);line-height:1;margin-top:-4px}
+  .card .cite{font-size:11px;color:var(--dim);border-top:1px solid var(--line);padding-top:10px}
+  .toast{position:fixed;bottom:180px;left:50%;transform:translateX(-50%);z-index:40;
+    background:rgba(20,14,4,.92);border:1px solid var(--warn);color:var(--warn);font-size:12px;
+    padding:9px 15px;border-radius:12px;max-width:88vw;text-align:center;display:none}
   .toast.show{display:block}
-  .guesschip{position:fixed;bottom:200px;left:50%;transform:translateX(-50%);
-    z-index:41;background:rgba(8,20,15,.92);border:1px solid var(--sink);
-    color:var(--ink);font-size:12.5px;padding:7px 8px 7px 14px;border-radius:999px;
-    display:none;align-items:center;gap:8px;box-shadow:0 6px 24px rgba(0,0,0,.5)}
-  .guesschip.show{display:flex}
-  .guesschip button{border:0;border-radius:999px;padding:5px 12px;font-size:12px;
-    font-weight:600;cursor:pointer;font-family:inherit}
-  #guessuse{background:var(--sink);color:#04180d}
-  #guessno{background:transparent;color:var(--dim);padding:5px 8px}
 </style>
 </head>
 <body>
+
+<div class="startscreen" id="start">
+  <h1>Fluxo Vivo AR</h1>
+  <p>Aponte a câmera para o chão. O app <b>reconhece a superfície</b> (grama, solo, água, concreto) e mostra o fluxo de gases de efeito estufa <b>típico daquele ambiente</b>, saindo só de onde deveria sair.</p>
+  <p class="warn">⚠ Os valores são de referência científica (literatura), não medição do ar à sua frente. Gases são invisíveis; nenhuma câmera os detecta.</p>
+  <p style="font-size:12px;color:var(--dim)">Usa um modelo de visão computacional que roda no seu aparelho. A primeira carga baixa ~5 MB e pode levar alguns segundos. Melhor no Chrome/Safari (não dentro de apps).</p>
+  <button id="startBtn">Ativar câmera e começar</button>
+</div>
+
+<div class="loadbar" id="loadbar">
+  <div class="spinner"></div>
+  <div id="loadtext">Carregando modelo de reconhecimento…</div>
+  <div style="font-size:11px;color:var(--dim);margin-top:8px">só na primeira vez</div>
+</div>
+
 <video id="cam" playsinline muted autoplay></video>
+<canvas id="gl"></canvas>
 <div id="app"></div>
 
-<div class="seal" id="seal">⚠ REPRESENTAÇÃO — valores simulados, não medição</div>
-<div class="locbar" id="locbar">📍 Sem localização — estação estimada pela data do aparelho</div>
+<div class="seal">⚠ REPRESENTAÇÃO — fluxo típico da literatura, não medição</div>
+<div class="locbar" id="locbar">📍 Sem localização — estação pela data</div>
 
 <div class="readout" id="readout">
-  <div style="color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.08em">Fluxo líquido de CO₂</div>
+  <div class="head" id="rhead">Aponte para uma superfície</div>
   <div class="big"><span id="rvalue">—</span> <span class="unit">µmol·m⁻²·s⁻¹</span></div>
   <div><span class="dir" id="rdir">—</span> <span id="rword" style="color:var(--dim)"></span></div>
+  <div class="detected" id="rdetected"></div>
   <div class="gwp" id="gwp"></div>
 </div>
 
 <div class="fabs">
   <button class="fab" id="btnInfo" title="Sobre">i</button>
-  <button class="fab" id="btnGPS" title="Usar minha localização">📍</button>
-  <button class="fab" id="btnCam" title="Modo câmera">📷</button>
+  <button class="fab" id="btnGPS" title="Localização">📍</button>
+  <button class="fab" id="btnSeg" title="Reconhecimento automático">🧠</button>
 </div>
 
 <div class="panel">
-  <div class="label">Superfície</div>
-  <div class="row">
-    <div class="seg" id="biome">
-      <button data-b="grass" class="on">🌾 Campo</button>
-      <button data-b="water">💧 Água</button>
-      <button data-b="soil">🟫 Solo seco</button>
-      <button data-b="burn">🔥 Queimada</button>
-      <button data-b="concrete">🧱 Concreto</button>
-    </div>
+  <div class="label">
+    <span>Superfície — <span id="modeLabel">automático</span></span>
+    <span class="modebadge auto" id="modeBadge">🧠 IA reconhece</span>
   </div>
-  <div class="label" style="display:flex;justify-content:space-between;align-items:center">
-    <span>Hora do dia — <span id="tlabel">meio-dia</span></span>
-    <button id="btnNow" style="display:none;border:1px solid var(--sink);
-      background:rgba(95,212,138,.15);color:var(--sink);font-size:10px;
-      font-weight:700;padding:3px 9px;border-radius:999px;cursor:pointer;
-      font-family:inherit;text-transform:none;letter-spacing:0">↻ hora real</button>
+  <div class="seg" id="biome">
+    <button data-b="auto" class="on">🧠 Auto</button>
+    <button data-b="grass">🌾 Campo</button>
+    <button data-b="water">💧 Água</button>
+    <button data-b="soil">🟫 Solo</button>
+    <button data-b="burn">🔥 Fogo</button>
+    <button data-b="concrete">🧱 Concreto</button>
   </div>
-  <div class="timewrap">
-    <span>🌙</span>
-    <input type="range" id="time" min="0" max="1439" value="720">
-    <span>☀️</span>
+  <div class="label" style="margin-top:10px">
+    <span>Hora — <span id="tlabel">—</span></span>
+    <button id="btnNow" style="display:none;border:1px solid var(--sink);background:rgba(64,255,144,.15);
+      color:var(--sink);font-size:10px;font-weight:700;padding:3px 9px;border-radius:999px;
+      cursor:pointer;font-family:inherit;text-transform:none">↻ hora real</button>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:2px">
+    <span style="font-size:15px">🌙</span>
+    <input type="range" id="time" min="0" max="1439" value="720" style="flex:1;height:6px">
+    <span style="font-size:15px">☀️</span>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
-<div class="guesschip" id="guesschip">
-  <span id="guesstext">Parece concreto?</span>
-  <button id="guessuse">usar</button>
-  <button id="guessno">✕</button>
-</div>
 
 <div class="modal" id="modal">
   <div class="card">
     <span class="x" id="modalX">×</span>
-    <h2>O que você está vendo</h2>
-    <p>Gases de efeito estufa são <b>invisíveis</b>. A câmera do seu celular <b>não</b> os detecta. As esferas são uma <b>camada ilustrativa</b> sobreposta à imagem para ensinar o conceito — não são o gás real à sua frente.</p>
-    <p><b>A ideia central:</b> o solo e a água do Pantanal não emitem o tempo todo. Conforme a hora e a superfície, o mesmo lugar pode <span class="dir down">absorver</span> carbono (fotossíntese, de dia) ou <span class="dir up">emitir</span> (respiração à noite; metano em áreas alagadas).</p>
-    <p><b>Cores:</b> <span class="swatch" style="background:var(--co2)"></span>CO₂ &nbsp; <span class="swatch" style="background:var(--ch4)"></span>CH₄ &nbsp; <span class="swatch" style="background:var(--n2o)"></span>N₂O &nbsp; <span class="swatch" style="background:var(--sink)"></span>sequestro</p>
-    <p><b>Modo câmera (📷):</b> usa a câmera só como cenário. Não há detecção nem rastreamento preciso do chão — apontar para cima não muda de onde as esferas nascem.</p>
-    <p class="cite">Valores em ordens de grandeza da literatura de zonas úmidas tropicais. Para uso científico, calibrar com medições locais (câmara de fluxo / eddy covariance). Divulgação — Pantanal Norte.</p>
+    <h2>Como funciona</h2>
+    <p><b>Reconhecimento real:</b> um modelo de visão computacional (DeepLab, treinado no dataset ADE20K) analisa a imagem da câmera e identifica cada região — grama, solo, água, construção. O gás sai <b>só</b> das superfícies que emitem. Concreto e piso não emitem nada.</p>
+    <p><b>O que é honesto aqui:</b> o app <b>reconhece</b> a superfície de verdade. O que ele <b>não</b> faz é medir o gás real — isso exige câmara de fluxo ou torre de eddy covariance. Os valores mostrados são o fluxo <b>típico</b> daquele tipo de ambiente, da literatura científica.</p>
+    <p><b>Cores:</b> <span style="color:var(--co2)">CO₂</span> · <span style="color:var(--ch4)">CH₄ metano</span> · <span style="color:var(--n2o)">N₂O</span> · <span style="color:var(--sink)">sequestro</span></p>
+    <p><b>Estação:</b> o mês real ajusta os valores ao regime de cheia/seca do Pantanal.</p>
+    <p class="cite">Reconhecimento: DeepLab v3 / ADE20K (TensorFlow.js, roda no aparelho). Fluxos: ordens de grandeza da literatura de zonas úmidas tropicais — calibrar com dados locais para uso científico.</p>
   </div>
 </div>
 
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 
-/* ============================================================
-   PARÂMETROS EDITÁVEIS — troque os números aqui.
-   base positivo = emite para a atmosfera; negativo = sequestra.
-   ============================================================ */
+/* ===== PARÂMETROS EDITÁVEIS ===== */
 const BIOMES = {
   grass: { name:'Campo (grama)', dayFlux:-8, nightFlux:+3, gases:['co2'],
-    note:'Fotossíntese domina de dia; respiração à noite.' },
-  water: { name:'Água (alagado)', dayFlux:+2, nightFlux:+4, gases:['ch4','co2'],
-    methane:true, note:'Ebulição de metano em pulsos irregulares.' },
-  soil:  { name:'Solo seco', dayFlux:+1.5, nightFlux:+3, gases:['co2','n2o'],
-    note:'Respiração do solo; N₂O baixo e esporádico.' },
-  burn:  { name:'Queimada ativa', dayFlux:+40, nightFlux:+38, gases:['co2','ch4','n2o'],
-    note:'Combustão libera pulso intenso e contínuo.' },
-  concrete:{ name:'Concreto / urbano', dayFlux:+0.1, nightFlux:+0.1, gases:['co2'],
-    note:'Superfície selada: fluxo biológico ~nulo. Contraste com o Pantanal.' },
+    note:'Fotossíntese de dia; respiração à noite.' },
+  water: { name:'Água (alagado)', dayFlux:+2, nightFlux:+4, gases:['ch4','co2'], methane:true,
+    note:'Ebulição de metano em pulsos.' },
+  soil:  { name:'Solo exposto', dayFlux:+1.5, nightFlux:+3, gases:['co2','n2o'],
+    note:'Respiração do solo; N₂O esporádico.' },
+  burn:  { name:'Queimada', dayFlux:+40, nightFlux:+38, gases:['co2','ch4','n2o'],
+    note:'Combustão: pulso intenso.' },
+  concrete:{ name:'Concreto / urbano', dayFlux:0, nightFlux:0, gases:[],
+    note:'Superfície selada: sem fluxo biológico.' },
 };
 const GWP = { co2:1, ch4:28, n2o:265 };
-
-/* ============================================================
-   ESTAÇÃO DO PANTANAL POR MÊS — CONFIRA COM SEU CAMPO EM CÁCERES.
-   wetness 0=seca total, 1=cheia. Modula metano e emissão de solo.
-   ============================================================ */
 const SEASON = {
-  1:['cheia',1.0], 2:['cheia',1.0], 3:['cheia',0.9], 4:['cheia',0.8],
-  5:['vazante',0.5], 6:['vazante',0.3],
-  7:['seca',0.1], 8:['seca',0.0], 9:['seca',0.0], 10:['seca',0.1],
-  11:['enchente',0.4], 12:['enchente',0.7]
+  1:['cheia',1.0],2:['cheia',1.0],3:['cheia',0.9],4:['cheia',0.8],
+  5:['vazante',0.5],6:['vazante',0.3],7:['seca',0.1],8:['seca',0.0],
+  9:['seca',0.0],10:['seca',0.1],11:['enchente',0.4],12:['enchente',0.7]
 };
 const BBOX={latmin:-22.5,latmax:-15.5,lonmin:-59.5,lonmax:-54.5};
 const inPantanal=(la,lo)=>la>=BBOX.latmin&&la<=BBOX.latmax&&lo>=BBOX.lonmin&&lo<=BBOX.lonmax;
 
-const world={
-  hasGPS:false, lat:null, lon:null, inRegion:false,
-  month:(new Date()).getMonth()+1,
-  manualTime:false,
-  mist:1.0
-};
+/* mapeamento de classes ADE20K -> bioma (por nome, robusto a off-by-one) */
+const CLASS_MAP = [
+  {b:'water', keys:['water','sea','river','lake','pool','waterfall','swimming']},
+  {b:'soil',  keys:['earth','ground','field','sand','dirt','mountain','mount','hill','rock','path','land','soil']},
+  {b:'grass', keys:['grass','tree','plant','palm','flower','bush','field of']},
+  {b:'concrete',keys:['wall','building','floor','road','route','sidewalk','pavement','ceiling',
+     'house','skyscraper','stairs','stairway','step','runway','bridge','fence','railing',
+     'column','door','window','tile','sink','toilet','bathtub','counter','desk','table','bench']},
+];
+function classToBiome(label){
+  const l=(label||'').toLowerCase();
+  for(const m of CLASS_MAP) if(m.keys.some(k=>l.includes(k))) return m.b;
+  return null; // sky, person, objetos -> não emite
+}
 
-let biome='grass', minutes=720, camMode=false;
-// Fator solar: 0 na noite plena, 1 no pico (~13h).
-// Nascer ~5h30, pôr ~18h30; meio-seno na janela diurna.
-const dayFactor = m => {
-  if(m<330||m>1110) return 0;
-  const t=(m-330)/(1110-330);
-  return Math.max(0,Math.sin(t*Math.PI));
-};
+const world={ hasGPS:false,lat:null,lon:null,inRegion:false,
+  month:(new Date()).getMonth()+1, manualTime:false, autoSeg:true };
+let biome='grass', minutes=720, segReady=false, segModel=null;
 
+const dayFactor=m=>{ if(m<330||m>1110)return 0; return Math.max(0,Math.sin((m-330)/(1110-330)*Math.PI)); };
+function wetness(){ return SEASON[world.month]?SEASON[world.month][1]:0.3; }
+function seasonName(){ return SEASON[world.month]?SEASON[world.month][0]:'—'; }
+function currentFlux(){
+  const b=BIOMES[biome], d=dayFactor(minutes);
+  let f=b.nightFlux+(b.dayFlux-b.nightFlux)*d;
+  if(biome==='concrete') return 0;
+  const w=wetness();
+  if(biome==='water') f+=w*4;
+  if(biome==='soil') f+=(1-w)*1.5;
+  if(biome==='grass'&&d>0) f+=w*2;
+  return f;
+}
+
+/* ===== three.js — sistema de névoa ===== */
 const app=document.getElementById('app');
 const scene=new THREE.Scene();
-scene.fog=new THREE.FogExp2(0x0a1410,0.03);
-const cam=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,100);
-cam.position.set(0,2.4,6); cam.lookAt(0,1.2,0);
+// câmera ortográfica: coordenadas de tela 0..1 mapeiam direto (AR overlay)
+const cam=new THREE.OrthographicCamera(0,1,1,0,-10,10);
+cam.position.z=5;
 const rnd=new THREE.WebGLRenderer({antialias:true,alpha:true});
-rnd.setSize(innerWidth,innerHeight);
-rnd.setPixelRatio(Math.min(devicePixelRatio,2));
+rnd.setSize(innerWidth,innerHeight); rnd.setPixelRatio(Math.min(devicePixelRatio,2));
+rnd.setClearColor(0x000000,0);
 app.appendChild(rnd.domElement);
+scene.add(new THREE.HemisphereLight(0x9fd0ff,0x2a3a20,0.8));
 
-const sky=new THREE.HemisphereLight(0x9fd0ff,0x2a3a20,0.6); scene.add(sky);
-const sun=new THREE.DirectionalLight(0xffffff,1.0);
-sun.position.set(4,8,3); scene.add(sun);
-
-const ground=new THREE.Mesh(new THREE.CircleGeometry(6,48),
-  new THREE.MeshStandardMaterial({color:0x24391f,roughness:1}));
-ground.rotation.x=-Math.PI/2; scene.add(ground);
-const grid=new THREE.GridHelper(12,24,0x3a5a3a,0x203020);
-grid.position.y=0.01; scene.add(grid);
-
-/* névoa/pluma de gás — Points com sprite radial suave */
-const COLORS={co2:0xff7a2a,ch4:0xe040ff,n2o:0x30b0ff,sink:0x40ff90};
-// sprite: disco radial com borda suave (parece fumaça, não bolha)
-function makeSmokeSprite(){
+function makeSmoke(){
   const c=document.createElement('canvas'); c.width=c.height=64;
-  const g=c.getContext('2d');
-  const grd=g.createRadialGradient(32,32,0,32,32,32);
-  grd.addColorStop(0,'rgba(255,255,255,1)');
-  grd.addColorStop(0.4,'rgba(255,255,255,0.5)');
-  grd.addColorStop(1,'rgba(255,255,255,0)');
-  g.fillStyle=grd; g.fillRect(0,0,64,64);
-  const t=new THREE.CanvasTexture(c); return t;
+  const g=c.getContext('2d'); const grd=g.createRadialGradient(32,32,0,32,32,32);
+  grd.addColorStop(0,'rgba(255,255,255,1)'); grd.addColorStop(0.4,'rgba(255,255,255,0.5)');
+  grd.addColorStop(1,'rgba(255,255,255,0)'); g.fillStyle=grd; g.fillRect(0,0,64,64);
+  return new THREE.CanvasTexture(c);
 }
-const smokeTex=makeSmokeSprite();
-
+const smokeTex=makeSmoke();
 const MAX=1600;
 const pGeo=new THREE.BufferGeometry();
-const pPos=new Float32Array(MAX*3);
-const pCol=new Float32Array(MAX*3);
-const pAlpha=new Float32Array(MAX);
+const pPos=new Float32Array(MAX*3), pCol=new Float32Array(MAX*3), pAl=new Float32Array(MAX);
 pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
 pGeo.setAttribute('gasColor',new THREE.BufferAttribute(pCol,3));
-pGeo.setAttribute('alpha',new THREE.BufferAttribute(pAlpha,1));
-// shader material p/ alpha por partícula + sprite
+pGeo.setAttribute('alpha',new THREE.BufferAttribute(pAl,1));
 const pMat=new THREE.ShaderMaterial({
-  uniforms:{ map:{value:smokeTex} },
-  transparent:true, depthWrite:false,
-  blending:THREE.NormalBlending,
-  vertexShader:`
-    attribute float alpha; attribute vec3 gasColor;
-    varying float vA; varying vec3 vC;
-    void main(){ vA=alpha; vC=gasColor;
-      vec4 mv=modelViewMatrix*vec4(position,1.0);
-      gl_PointSize=max(24.0, 320.0*(1.0/-mv.z));
-      gl_Position=projectionMatrix*mv; }`,
-  fragmentShader:`
-    uniform sampler2D map; varying float vA; varying vec3 vC;
-    void main(){ vec4 t=texture2D(map,gl_PointCoord);
-      if(t.a*vA<0.01) discard;
-      gl_FragColor=vec4(vC, t.a*vA); }`
+  uniforms:{map:{value:smokeTex}}, transparent:true, depthWrite:false, blending:THREE.NormalBlending,
+  vertexShader:`attribute float alpha;attribute vec3 gasColor;varying float vA;varying vec3 vC;
+    void main(){vA=alpha;vC=gasColor;
+    gl_PointSize=38.0;
+    gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+  fragmentShader:`uniform sampler2D map;varying float vA;varying vec3 vC;
+    void main(){vec4 t=texture2D(map,gl_PointCoord);if(t.a*vA<0.01)discard;gl_FragColor=vec4(vC,t.a*vA);}`
 });
-const pts=new THREE.Points(pGeo,pMat); scene.add(pts);
-
-const pool=[];
-for(let i=0;i<MAX;i++) pool.push({i,life:0,x:0,y:0,z:0,vx:0,vy:0,vz:0,dir:1,phase:0,freq:0});
+scene.add(new THREE.Points(pGeo,pMat));
+const COLORS={co2:0xff7a2a,ch4:0xe040ff,n2o:0x30b0ff,sink:0x40ff90};
+const pool=[]; for(let i=0;i<MAX;i++) pool.push({i,life:0,x:0,y:0,z:0,vx:0,vy:0,vz:0,dir:1,phase:0,freq:0,sx:0.5,sy:0.5});
 let cursor=0;
-function hexToRGB(h){return [((h>>16)&255)/255,((h>>8)&255)/255,(h&255)/255];}
-function spawn(gas,goingUp,strength){
+function hexRGB(h){return[((h>>16)&255)/255,((h>>8)&255)/255,(h&255)/255];}
+
+/* ===== SEGMENTAÇÃO: mapa de emissão por região da tela ===== */
+// grade de emissão: para cada célula da tela, qual bioma foi detectado
+const GRID_W=32, GRID_H=64; // colunas x linhas (retrato)
+let emitGrid=new Array(GRID_W*GRID_H).fill(null); // bioma por célula ou null
+let segStats={}; // contagem de biomas detectados
+
+function spawnAt(sx,sy,gas,goingUp,strength){
+  // sx,sy em 0..1 (coord de tela). y de tela: 0=topo,1=base -> inverte p/ mundo (y sobe)
   const p=pool[cursor]; cursor=(cursor+1)%MAX;
-  // área ampla: espalha por toda a frente visível, não só no centro
-  p.x=(Math.random()-0.5)*11;
-  p.z=(Math.random()-0.5)*9 - 1;
-  p.y=goingUp? 0.05+Math.random()*0.15 : 2.6+Math.random()*1.2;
-  p.vx=(Math.random()-.5)*0.05;
-  p.vy=(goingUp?1:-1)*(0.25+strength*0.012)*(0.6+Math.random()*0.7);
-  p.vz=(Math.random()-.5)*0.05;
-  p.dir=goingUp?1:-1; p.life=1;
-  p.phase=Math.random()*Math.PI*2; p.freq=0.8+Math.random()*1.4;
-  const c=hexToRGB(goingUp?COLORS[gas]:COLORS.sink);
+  p.x=sx;
+  p.y=goingUp ? (1-sy) : (1-sy)+0.18;   // sequestro entra de cima
+  p.z=0;
+  p.vx=(Math.random()-.5)*0.02;
+  p.vy=(goingUp?1:-1)*(0.03+strength*0.002)*(0.6+Math.random()*0.7);
+  p.vz=0;
+  p.dir=goingUp?1:-1; p.life=1; p.phase=Math.random()*6.28; p.freq=0.8+Math.random()*1.4;
+  const c=hexRGB(goingUp?COLORS[gas]:COLORS.sink);
   pCol[p.i*3]=c[0]; pCol[p.i*3+1]=c[1]; pCol[p.i*3+2]=c[2];
 }
 
-const rvalue=document.getElementById('rvalue');
-const rdir=document.getElementById('rdir');
-const rword=document.getElementById('rword');
-const gwpEl=document.getElementById('gwp');
-const tlabel=document.getElementById('tlabel');
+/* ===== readout ===== */
+const $=id=>document.getElementById(id);
 const fmtTime=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
-function timeWord(m){const h=m/60;
-  if(h<5)return'madrugada';if(h<8)return'amanhecer';if(h<11)return'manhã';
-  if(h<14)return'meio-dia';if(h<17)return'tarde';if(h<19)return'entardecer';return'noite';}
-function wetness(){ return SEASON[world.month] ? SEASON[world.month][1] : 0.3; }
-function seasonName(){ return SEASON[world.month] ? SEASON[world.month][0] : '—'; }
-function currentFlux(){
-  const b=BIOMES[biome], d=dayFactor(minutes);
-  let f = b.nightFlux+(b.dayFlux-b.nightFlux)*d;
-  if(biome==='concrete') return f; // superfície selada, sem efeito sazonal
-  const w=wetness();
-  // Água: metano potencializado na cheia (mais lâmina d'água).
-  if(biome==='water') f += w*4;
-  // Solo seco: encharcado emite menos CO2 (respiração cai); seco emite mais.
-  if(biome==='soil') f += (1-w)*1.5;
-  // Campo alagado na cheia: sequestro diurno cai (planta submersa/estressada).
-  if(biome==='grass' && d>0) f += w*2;
-  return f;
-}
+function timeWord(m){const h=m/60;if(h<5)return'madrugada';if(h<8)return'amanhecer';
+  if(h<11)return'manhã';if(h<14)return'meio-dia';if(h<17)return'tarde';if(h<19)return'entardecer';return'noite';}
 function updateReadout(){
-  const b=BIOMES[biome],f=currentFlux(),up=f>0;
-  rvalue.textContent=(f>0?'+':'')+f.toFixed(1);
-  rdir.className='dir '+(up?'up':'down');
-  rdir.textContent=up?'▲ emite':'▼ sequestra';
-  rword.textContent=up?'para a atmosfera':'da atmosfera';
-  document.querySelector('.readout > div:first-child').textContent='Fluxo líquido — '+b.name;
+  const b=BIOMES[biome], f=currentFlux(), up=f>0, zero=(f===0);
+  $('rhead').textContent='Fluxo típico — '+b.name;
+  $('rvalue').textContent=(f>0?'+':'')+f.toFixed(1);
+  $('rdir').className='dir '+(zero?'zero':up?'up':'down');
+  $('rdir').textContent=zero?'— sem fluxo':up?'▲ emite':'▼ sequestra';
+  $('rword').textContent=zero?'(superfície selada)':up?'para a atmosfera':'da atmosfera';
   let g='';
-  if(b.gases.includes('ch4'))g+=`CH₄ ~${GWP.ch4}× o CO₂ (100 anos). `;
+  if(b.gases.includes('ch4'))g+=`CH₄ ~${GWP.ch4}× CO₂. `;
   if(b.gases.includes('n2o'))g+=`N₂O ~${GWP.n2o}×. `;
   g+=b.note;
-  const mesNome=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][world.month];
-  g+=` · ${seasonName()} (${mesNome})`;
-  gwpEl.textContent=g;
-  tlabel.textContent=timeWord(minutes)+' · '+fmtTime(minutes)+(world.manualTime?' (manual)':' (agora)');
-  const d=dayFactor(minutes);
-  sun.intensity=0.15+d*1.0; sky.intensity=0.25+d*0.55;
-  const nightCol=new THREE.Color(0x0a1410),dayCol=new THREE.Color(0x16281a);
-  scene.fog.color.copy(nightCol).lerp(dayCol,d);
+  const mes=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][world.month];
+  g+=` · ${seasonName()} (${mes})`;
+  $('gwp').textContent=g;
+  // superfícies detectadas na cena
+  if(world.autoSeg && segReady){
+    const found=Object.keys(segStats).filter(k=>segStats[k]>2 && k!=='concrete');
+    const names={grass:'campo',water:'água',soil:'solo',concrete:'concreto'};
+    const list=Object.keys(segStats).filter(k=>segStats[k]>2).map(k=>names[k]||k);
+    $('rdetected').textContent=list.length?('🧠 detectado: '+list.join(', ')):'';
+  } else $('rdetected').textContent='';
+  $('tlabel').textContent=timeWord(minutes)+' · '+fmtTime(minutes)+(world.manualTime?' (manual)':' (agora)');
 }
 
-let tiltX=0,tiltY=0;
-let driftX=0, driftZ=0, skyFactor=1;
-let lastGamma=0, lastBeta=0;
-addEventListener('deviceorientation',e=>{
-  if(!camMode)return;
-  const gamma=e.gamma||0, beta=e.beta||0;
-  tiltX=THREE.MathUtils.degToRad(gamma)*0.6;
-  tiltY=THREE.MathUtils.degToRad(beta-45)*0.6;
-  // deriva: quanto o celular girou desde o último quadro -> névoa desliza
-  driftX += (gamma-lastGamma)*0.004;
-  driftZ += (beta-lastBeta)*0.004;
-  lastGamma=gamma; lastBeta=beta;
-  // apontado pro céu: beta baixo (~0, celular deitado voltado p/ cima)
-  // ou muito alto (>110, virado pra trás). Reduz emissão nesses casos.
-  skyFactor = (beta<20 || beta>115) ? 0.25 : 1.0;
-});
-
-let last=performance.now(),acc=0;
+/* ===== loop ===== */
+let last=performance.now(), acc=0;
 function tick(now){
   const dt=Math.min(0.05,(now-last)/1000); last=now;
-  const b=BIOMES[biome],f=currentFlux();
-  // world.mist (cor da câmera) e wetness afetam SÓ a quantidade visual.
-  const visualMult = world.mist * (0.7 + wetness()*0.6) * (camMode?skyFactor:1);
-  acc+=(0.6+Math.min(1,Math.abs(f)/12))*7*dt*30*visualMult;
-  while(acc>1){
-    acc-=1; const up=f>0;
-    if(up){
-      const g=b.gases[Math.floor(Math.random()*b.gases.length)];
-      if(g==='ch4'&&!b.methane&&Math.random()>0.3)continue;
-      spawn(g,true,Math.abs(f));
-    }else spawn('co2',false,Math.abs(f));
-  }
-  if(b.methane&&Math.random()<0.03)for(let k=0;k<5;k++)spawn('ch4',true,6);
   const t=now*0.001;
-  // deriva do movimento do celular desloca toda a névoa (sensação de varredura)
-  const dX = camMode? driftX : 0;
-  const dZ = camMode? driftZ : 0;
-  driftX*=0.9; driftZ*=0.9; // amortece de volta ao repouso
+
+  if(world.autoSeg && segReady){
+    // emite a partir da grade de emissão real (segmentação)
+    // conta células emissoras e distribui partículas nelas
+    let emitters=[];
+    for(let gy=0;gy<GRID_H;gy++)for(let gx=0;gx<GRID_W;gx++){
+      const bcell=emitGrid[gy*GRID_W+gx];
+      if(bcell && bcell!=='concrete') emitters.push([gx,gy,bcell]);
+    }
+    if(emitters.length){
+      const budget=Math.min(60, emitters.length); // partículas/frame proporcional à área
+      for(let k=0;k<budget;k++){
+        const [gx,gy,bcell]=emitters[(Math.random()*emitters.length)|0];
+        const bb=BIOMES[bcell];
+        // fluxo daquela célula
+        const savedBiome=biome; biome=bcell; const f=currentFlux(); biome=savedBiome;
+        if(f===0) continue;
+        const up=f>0;
+        const sx=(gx+Math.random())/GRID_W;
+        const sy=(gy+Math.random())/GRID_H;
+        let gas='co2';
+        if(up){ gas=bb.gases[(Math.random()*bb.gases.length)|0]||'co2'; }
+        spawnAt(sx,sy,gas,up,Math.abs(f));
+      }
+    }
+  } else {
+    // modo manual: emite pela tela toda
+    const b=BIOMES[biome], f=currentFlux();
+    if(f!==0){
+      acc+=(0.6+Math.min(1,Math.abs(f)/12))*7*dt*30;
+      while(acc>1){ acc-=1; const up=f>0;
+        let gas='co2'; if(up){gas=b.gases[(Math.random()*b.gases.length)|0]||'co2';}
+        spawnAt(Math.random(),Math.random(),gas,up,Math.abs(f));
+      }
+    }
+  }
+
   for(const p of pool){
-    if(p.life<=0){ pAlpha[p.i]=0; continue; }
-    const turb=Math.sin(t*p.freq+p.phase)*0.15*p.life;
-    p.x+=(p.vx+turb)*dt - dX;
-    p.y+=p.vy*dt;
-    p.z+=(p.vz+Math.cos(t*p.freq+p.phase)*0.15*p.life)*dt - dZ;
-    p.life-=dt*0.28;
-    pPos[p.i*3]=p.x; pPos[p.i*3+1]=p.y; pPos[p.i*3+2]=p.z;
+    if(p.life<=0){pAl[p.i]=0;continue;}
+    const turb=Math.sin(t*p.freq+p.phase)*0.02*p.life;
+    p.x+=(p.vx+turb)*dt; p.y+=p.vy*dt;
+    p.life-=dt*0.3;
+    pPos[p.i*3]=p.x; pPos[p.i*3+1]=p.y; pPos[p.i*3+2]=0;
     const age=1-p.life;
-    pAlpha[p.i]=Math.min(0.9, p.life*1.1) * (age<0.15? age/0.15 : 1);
-    if((p.dir<0&&p.y<0.05)||p.life<=0){p.life=0;pAlpha[p.i]=0;}
+    pAl[p.i]=Math.min(0.9,p.life*1.1)*(age<0.15?age/0.15:1);
+    if(p.life<=0||p.y>1.1||p.y<-0.1){p.life=0;pAl[p.i]=0;}
   }
   pGeo.attributes.position.needsUpdate=true;
   pGeo.attributes.alpha.needsUpdate=true;
   pGeo.attributes.gasColor.needsUpdate=true;
-  if(camMode){
-    scene.rotation.y+=(tiltX-scene.rotation.y)*0.08;
-    cam.position.y=2.4+tiltY*1.5; cam.lookAt(0,1.2,0);
-  }else scene.rotation.y+=dt*0.05;
   rnd.render(scene,cam);
   requestAnimationFrame(tick);
 }
 updateReadout(); requestAnimationFrame(tick);
 
-document.getElementById('biome').addEventListener('click',e=>{
+/* ===== controles de bioma ===== */
+$('biome').addEventListener('click',e=>{
   const btn=e.target.closest('button'); if(!btn)return;
-  biome=btn.dataset.b;
+  const b=btn.dataset.b;
   [...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===btn));
-  updateReadout();
-});
-const timeSlider=document.getElementById('time');
-const btnNow=document.getElementById('btnNow');
-function syncRealTime(){
-  const now=new Date();
-  minutes=now.getHours()*60+now.getMinutes();
-  timeSlider.value=minutes;
-  updateReadout();
-}
-timeSlider.addEventListener('input',e=>{
-  minutes=+e.target.value; world.manualTime=true;
-  btnNow.style.display='block';
-  updateReadout();
-});
-btnNow.addEventListener('click',()=>{
-  world.manualTime=false; btnNow.style.display='none';
-  syncRealTime();
-});
-// inicia no relógio real e mantém sincronizado enquanto estiver automático
-syncRealTime();
-setInterval(()=>{ if(!world.manualTime) syncRealTime(); }, 30000);
-const modal=document.getElementById('modal');
-document.getElementById('btnInfo').onclick=()=>modal.classList.add('open');
-document.getElementById('modalX').onclick=()=>modal.classList.remove('open');
-modal.addEventListener('click',e=>{if(e.target===modal)modal.classList.remove('open');});
-addEventListener('resize',()=>{
-  cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();
-  rnd.setSize(innerWidth,innerHeight);
-});
-
-const video=document.getElementById('cam');
-const btnCam=document.getElementById('btnCam');
-const toast=document.getElementById('toast');
-function showToast(msg,ms=3400){toast.textContent=msg;toast.classList.add('show');
-  clearTimeout(toast._t);toast._t=setTimeout(()=>toast.classList.remove('show'),ms);}
-async function enableCam(){
-  try{
-    if(typeof DeviceOrientationEvent!=='undefined' &&
-       typeof DeviceOrientationEvent.requestPermission==='function'){
-      try{await DeviceOrientationEvent.requestPermission();}catch(_){}
-    }
-    const stream=await navigator.mediaDevices.getUserMedia({
-      video:{facingMode:{ideal:'environment'}},audio:false});
-    video.srcObject=stream; await video.play();
-    video.classList.add('on');
-    ground.visible=false; grid.visible=false; scene.fog.density=0.0;
-    camMode=true; btnCam.classList.add('active');
-    showToast('Camada ilustrativa sobre a câmera — não é medição do ar real.');
-  }catch(err){
-    showToast('Câmera indisponível (permissão negada ou navegador embutido). Seguindo em 3D.');
+  if(b==='auto'){
+    world.autoSeg=true; $('modeLabel').textContent='automático';
+    $('modeBadge').textContent='🧠 IA reconhece'; $('modeBadge').classList.add('auto');
+    $('btnSeg').classList.add('active');
+  }else{
+    world.autoSeg=false; biome=b; $('modeLabel').textContent='manual';
+    $('modeBadge').textContent='✋ manual'; $('modeBadge').classList.remove('auto');
+    $('btnSeg').classList.remove('active');
   }
-}
-function disableCam(){
-  const s=video.srcObject; if(s)s.getTracks().forEach(t=>t.stop());
-  video.srcObject=null; video.classList.remove('on');
-  ground.visible=true; grid.visible=true; scene.fog.density=0.03;
-  camMode=false; btnCam.classList.remove('active');
-  scene.rotation.y=0; cam.position.set(0,2.4,6); cam.lookAt(0,1.2,0);
-}
-btnCam.onclick=()=>{camMode?disableCam():enableCam();};
+  updateReadout();
+});
 
-/* ---------- GPS ---------- */
-const locbar=document.getElementById('locbar');
-const btnGPS=document.getElementById('btnGPS');
-function setLoc(text,cls){locbar.textContent=text;locbar.className='locbar'+(cls?' '+cls:'');}
+/* ===== hora ===== */
+const timeSlider=$('time'), btnNow=$('btnNow');
+function syncReal(){const n=new Date();minutes=n.getHours()*60+n.getMinutes();timeSlider.value=minutes;updateReadout();}
+timeSlider.addEventListener('input',e=>{minutes=+e.target.value;world.manualTime=true;btnNow.style.display='block';updateReadout();});
+btnNow.addEventListener('click',()=>{world.manualTime=false;btnNow.style.display='none';syncReal();});
+syncReal(); setInterval(()=>{if(!world.manualTime)syncReal();},30000);
+
+/* ===== GPS ===== */
+const locbar=$('locbar');
+function setLoc(t,c){locbar.textContent=t;locbar.className='locbar'+(c?' '+c:'');}
 function requestGPS(){
-  if(!navigator.geolocation){
-    setLoc('📍 GPS indisponível neste navegador — estação pela data','warn'); return;
-  }
+  if(!navigator.geolocation){setLoc('📍 GPS indisponível — estação pela data','warn');return;}
   setLoc('📍 Localizando…');
-  navigator.geolocation.getCurrentPosition(pos=>{
-    world.hasGPS=true;
-    world.lat=pos.coords.latitude; world.lon=pos.coords.longitude;
+  navigator.geolocation.getCurrentPosition(p=>{
+    world.hasGPS=true;world.lat=p.coords.latitude;world.lon=p.coords.longitude;
     world.inRegion=inPantanal(world.lat,world.lon);
     const mes=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][world.month];
-    if(world.inRegion){
-      setLoc(`📍 No Pantanal · ${seasonName()} (${mes}) · dados regionais`,'ok');
-    }else{
-      setLoc(`📍 Fora do Pantanal · usando ${seasonName()} do Pantanal como referência`,'warn');
+    setLoc(world.inRegion?`📍 No Pantanal · ${seasonName()} (${mes})`:`📍 Fora do Pantanal · ref. ${seasonName()}`,
+      world.inRegion?'ok':'warn');
+    $('btnGPS').classList.add('active'); updateReadout();
+  },()=>setLoc('📍 Localização negada — estação pela data','warn'),
+  {enableHighAccuracy:false,timeout:8000,maximumAge:600000});
+}
+$('btnGPS').onclick=requestGPS;
+
+/* ===== modal ===== */
+$('btnInfo').onclick=()=>$('modal').classList.add('open');
+$('modalX').onclick=()=>$('modal').classList.remove('open');
+$('modal').addEventListener('click',e=>{if(e.target===$('modal'))$('modal').classList.remove('open');});
+$('btnSeg').onclick=()=>{ document.querySelector('#biome button[data-b=auto]').click(); };
+
+/* ===== toast ===== */
+const toast=$('toast');
+function showToast(m,ms=3500){toast.textContent=m;toast.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>toast.classList.remove('show'),ms);}
+
+addEventListener('resize',()=>{rnd.setSize(innerWidth,innerHeight);});
+
+/* ===== câmera + modelo de segmentação ===== */
+const video=$('cam');
+let segCanvas=document.createElement('canvas'); // frame reduzido p/ inferência
+segCanvas.width=257; segCanvas.height=257;
+const segCtx=segCanvas.getContext('2d',{willReadFrequently:true});
+
+function loadScript(src){
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script'); s.src=src;
+    s.onload=res; s.onerror=()=>rej(new Error('falha ao carregar '+src));
+    document.head.appendChild(s);
+  });
+}
+async function loadTF(){
+  $('loadtext').textContent='Carregando TensorFlow.js…';
+  await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js');
+  $('loadtext').textContent='Carregando modelo DeepLab…';
+  await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/deeplab@0.2.2/dist/deeplab.min.js');
+  const tf=window.tf, deeplab=window.deeplab;
+  if(!tf||!deeplab) throw new Error('bibliotecas não carregaram');
+  await tf.ready();
+  segModel=await deeplab.load({base:'ade20k',quantizationBytes:2});
+  segReady=true;
+}
+
+async function segLoop(){
+  if(!segReady||!segModel){ setTimeout(segLoop,500); return; }
+  if(!world.autoSeg){ setTimeout(segLoop,300); return; }
+  try{
+    if(video.readyState>=2){
+      // desenha frame reduzido
+      segCtx.drawImage(video,0,0,257,257);
+      const seg=await segModel.segment(segCanvas);
+      // seg.segmentationMap: Uint8, seg.width, seg.height, seg.legend {label:[r,g,b]}
+      // constrói lista de labels por id de cor
+      buildEmitGrid(seg);
     }
-    btnGPS.classList.add('active');
-    updateReadout();
-  },err=>{
-    setLoc('📍 Localização negada — estação estimada pela data do aparelho','warn');
-  },{enableHighAccuracy:false,timeout:8000,maximumAge:600000});
+  }catch(err){ console.warn('seg erro',err); }
+  setTimeout(segLoop, 1200); // ~1 inferência por 1.2s
 }
-btnGPS.onclick=requestGPS;
 
-/* ---------- amostragem de cor da câmera -> névoa (só visual) ---------- */
-const sampleCanvas=document.createElement('canvas');
-sampleCanvas.width=32; sampleCanvas.height=32;
-const sctx=sampleCanvas.getContext('2d',{willReadFrequently:true});
-let sampleTimer=null;
-function startColorSampling(){
-  stopColorSampling();
-  sampleTimer=setInterval(()=>{
-    if(!camMode||video.readyState<2)return;
-    try{
-      sctx.drawImage(video,0,0,32,32);
-      const d=sctx.getImageData(0,0,32,32).data;
-      let sum=0, rS=0,gS=0,bS=0, n=d.length/4;
-      for(let i=0;i<d.length;i+=4){
-        rS+=d[i]; gS+=d[i+1]; bS+=d[i+2];
-        sum+=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]);
-      }
-      const lum=(sum/n)/255;
-      world.mist=Math.max(0.6,Math.min(1.6,1.6-lum*1.0));
-      // palpite grosseiro de superfície (SUGESTÃO, não detecção)
-      const r=rS/n, g=gS/n, bl=bS/n, mx=Math.max(r,g,bl), mn=Math.min(r,g,bl);
-      const sat=(mx-mn)/(mx||1);
-      let guess=null;
-      if(sat<0.12 && lum>0.35 && lum<0.75) guess='concrete';   // cinza médio
-      else if(g>r*1.15 && g>bl*1.05 && sat>0.18) guess='grass'; // esverdeado
-      else if(bl>r*1.1 && bl>g*1.02) guess='water';            // azulado
-      else if(r>g*1.05 && sat>0.15 && lum<0.55) guess='soil';  // terroso escuro
-      showSurfaceGuess(guess);
-    }catch(_){}
-  },700);
-}
-function stopColorSampling(){ if(sampleTimer){clearInterval(sampleTimer);sampleTimer=null;} world.mist=1.0; }
-
-/* liga/desliga amostragem junto com a câmera */
-const _enableCam=enableCam, _disableCam=disableCam;
-enableCam=async function(){ await _enableCam(); if(camMode) startColorSampling(); };
-disableCam=function(){ stopColorSampling(); _disableCam(); };
-btnCam.onclick=()=>{camMode?disableCam():enableCam();};
-
-/* ---------- sugestão de superfície (câmera sugere, você confirma) ---------- */
-const guesschip=document.getElementById('guesschip');
-const guesstext=document.getElementById('guesstext');
-const NAMES={grass:'campo/grama',water:'água',soil:'solo exposto',concrete:'concreto',burn:'queimada'};
-let lastGuess=null, guessTimer=null;
-function showSurfaceGuess(g){
-  if(!g || g===biome){ guesschip.classList.remove('show'); return; }
-  if(g===lastGuess && guesschip.classList.contains('show')) return;
-  lastGuess=g;
-  guesstext.textContent='Parece '+NAMES[g]+'?';
-  guesschip.classList.add('show');
-  clearTimeout(guessTimer);
-  guessTimer=setTimeout(()=>guesschip.classList.remove('show'),4000);
-}
-function selectBiome(b){
-  biome=b;
-  [...document.getElementById('biome').children].forEach(c=>c.classList.toggle('on',c.dataset.b===b));
+function buildEmitGrid(seg){
+  const {segmentationMap,width,height,legend}=seg;
+  // legend: {labelName: [r,g,b]}. Inverter: cor-> bioma
+  const colorBiome={};
+  for(const label in legend){
+    const [r,g,b]=legend[label];
+    colorBiome[`${r},${g},${b}`]=classToBiome(label);
+  }
+  const newGrid=new Array(GRID_W*GRID_H).fill(null);
+  const stats={};
+  // segmentationMap é RGB por pixel (3 bytes) OU índice? deeplab retorna RGB colorido.
+  // Mapeia cada célula da grade para o bioma dominante
+  for(let gy=0;gy<GRID_H;gy++){
+    for(let gx=0;gx<GRID_W;gx++){
+      // amostra o centro da célula
+      const px=Math.floor((gx+0.5)/GRID_W*width);
+      const py=Math.floor((gy+0.5)/GRID_H*height);
+      const idx=(py*width+px)*3;
+      const r=segmentationMap[idx],g=segmentationMap[idx+1],b=segmentationMap[idx+2];
+      const bio=colorBiome[`${r},${g},${b}`]||null;
+      newGrid[gy*GRID_W+gx]=bio;
+      if(bio){stats[bio]=(stats[bio]||0)+1;}
+    }
+  }
+  emitGrid=newGrid; segStats=stats;
   updateReadout();
 }
-document.getElementById('guessuse').onclick=()=>{
-  if(lastGuess) selectBiome(lastGuess);
-  guesschip.classList.remove('show');
+
+/* ===== start ===== */
+$('startBtn').onclick=async()=>{
+  $('start').style.display='none';
+  $('loadbar').classList.add('show');
+  try{
+    if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+      try{await DeviceOrientationEvent.requestPermission();}catch(_){}
+    }
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    video.srcObject=stream; await video.play();
+    await loadTF();
+    $('loadbar').classList.remove('show');
+    segLoop();
+    requestGPS();
+    showToast('IA reconhecendo superfícies — gás sai só de onde deve.');
+  }catch(err){
+    $('loadbar').classList.remove('show');
+    showToast('Falha ao iniciar câmera ou modelo. Abra no Chrome/Safari, fora de apps.',5000);
+    // cai pro modo manual sem câmera
+    world.autoSeg=false;
+    document.querySelector('#biome button[data-b=grass]').click();
+  }
 };
-document.getElementById('guessno').onclick=()=>guesschip.classList.remove('show');
-
-/* tenta GPS automaticamente ao abrir (degrada limpo se negado) */
-requestGPS();
-
-if(!sessionStorage.getItem('seen')){modal.classList.add('open');sessionStorage.setItem('seen','1');}
 </script>
 </body>
 </html>
