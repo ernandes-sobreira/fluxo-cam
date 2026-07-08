@@ -262,7 +262,7 @@ function makeSmokeSprite(){
 }
 const smokeTex=makeSmokeSprite();
 
-const MAX=900;
+const MAX=1600;
 const pGeo=new THREE.BufferGeometry();
 const pPos=new Float32Array(MAX*3);
 const pCol=new Float32Array(MAX*3);
@@ -296,9 +296,10 @@ let cursor=0;
 function hexToRGB(h){return [((h>>16)&255)/255,((h>>8)&255)/255,(h&255)/255];}
 function spawn(gas,goingUp,strength){
   const p=pool[cursor]; cursor=(cursor+1)%MAX;
-  const a=Math.random()*Math.PI*2, r=Math.random()*2.6;
-  p.x=Math.cos(a)*r; p.z=Math.sin(a)*r;
-  p.y=goingUp? 0.05+Math.random()*0.1 : 2.4+Math.random();
+  // área ampla: espalha por toda a frente visível, não só no centro
+  p.x=(Math.random()-0.5)*11;
+  p.z=(Math.random()-0.5)*9 - 1;
+  p.y=goingUp? 0.05+Math.random()*0.15 : 2.6+Math.random()*1.2;
   p.vx=(Math.random()-.5)*0.05;
   p.vy=(goingUp?1:-1)*(0.25+strength*0.012)*(0.6+Math.random()*0.7);
   p.vz=(Math.random()-.5)*0.05;
@@ -354,10 +355,20 @@ function updateReadout(){
 }
 
 let tiltX=0,tiltY=0;
+let driftX=0, driftZ=0, skyFactor=1;
+let lastGamma=0, lastBeta=0;
 addEventListener('deviceorientation',e=>{
   if(!camMode)return;
-  tiltX=THREE.MathUtils.degToRad(e.gamma||0)*0.6;
-  tiltY=THREE.MathUtils.degToRad((e.beta||0)-45)*0.6;
+  const gamma=e.gamma||0, beta=e.beta||0;
+  tiltX=THREE.MathUtils.degToRad(gamma)*0.6;
+  tiltY=THREE.MathUtils.degToRad(beta-45)*0.6;
+  // deriva: quanto o celular girou desde o último quadro -> névoa desliza
+  driftX += (gamma-lastGamma)*0.004;
+  driftZ += (beta-lastBeta)*0.004;
+  lastGamma=gamma; lastBeta=beta;
+  // apontado pro céu: beta baixo (~0, celular deitado voltado p/ cima)
+  // ou muito alto (>110, virado pra trás). Reduz emissão nesses casos.
+  skyFactor = (beta<20 || beta>115) ? 0.25 : 1.0;
 });
 
 let last=performance.now(),acc=0;
@@ -365,8 +376,8 @@ function tick(now){
   const dt=Math.min(0.05,(now-last)/1000); last=now;
   const b=BIOMES[biome],f=currentFlux();
   // world.mist (cor da câmera) e wetness afetam SÓ a quantidade visual.
-  const visualMult = world.mist * (0.7 + wetness()*0.6);
-  acc+=(0.4+Math.min(1,Math.abs(f)/12))*4*dt*30*visualMult;
+  const visualMult = world.mist * (0.7 + wetness()*0.6) * (camMode?skyFactor:1);
+  acc+=(0.6+Math.min(1,Math.abs(f)/12))*7*dt*30*visualMult;
   while(acc>1){
     acc-=1; const up=f>0;
     if(up){
@@ -377,16 +388,18 @@ function tick(now){
   }
   if(b.methane&&Math.random()<0.03)for(let k=0;k<5;k++)spawn('ch4',true,6);
   const t=now*0.001;
+  // deriva do movimento do celular desloca toda a névoa (sensação de varredura)
+  const dX = camMode? driftX : 0;
+  const dZ = camMode? driftZ : 0;
+  driftX*=0.9; driftZ*=0.9; // amortece de volta ao repouso
   for(const p of pool){
     if(p.life<=0){ pAlpha[p.i]=0; continue; }
-    // turbulência lateral senoidal — dá sensação de fumaça subindo
     const turb=Math.sin(t*p.freq+p.phase)*0.15*p.life;
-    p.x+=(p.vx+turb)*dt;
+    p.x+=(p.vx+turb)*dt - dX;
     p.y+=p.vy*dt;
-    p.z+=(p.vz+Math.cos(t*p.freq+p.phase)*0.15*p.life)*dt;
+    p.z+=(p.vz+Math.cos(t*p.freq+p.phase)*0.15*p.life)*dt - dZ;
     p.life-=dt*0.28;
     pPos[p.i*3]=p.x; pPos[p.i*3+1]=p.y; pPos[p.i*3+2]=p.z;
-    // névoa: nasce translúcida, fica um pouco mais densa, dissipa
     const age=1-p.life;
     pAlpha[p.i]=Math.min(0.9, p.life*1.1) * (age<0.15? age/0.15 : 1);
     if((p.dir<0&&p.y<0.05)||p.life<=0){p.life=0;pAlpha[p.i]=0;}
